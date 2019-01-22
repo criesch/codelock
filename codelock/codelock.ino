@@ -66,7 +66,7 @@ void setup() {
     digitalWrite(relaypins[i], LOW);
     pinMode(relaypins[i], OUTPUT);
   }
-  pinMode(pinRelay1Pb, INPUT);
+  pinMode(pinRelay1Pb, INPUT_PULLUP);
 }
 
 void loop() {
@@ -91,9 +91,13 @@ void loop() {
   }
 
   // check the dedicated relay 1 pushbutton
-  /*if (digitalRead(pinRelay1Pb)) {
-    selectedRelay = 1;
-  }*/
+  if (digitalRead(pinRelay1Pb) == LOW) {
+    lastkeypresstime = millis();
+    if (selectedRelay != 1) {
+      selectedRelay = 1;
+      Serial.println("Selected relay " + String(selectedRelay));
+    }
+  }
 
   if (key != NO_KEY){
     Serial.println(key);

@@ -37,7 +37,7 @@ Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 
 // output relays
 const byte NUMRELAYS = 4;
-byte relaypins[NUMRELAYS] = { 4, 5, 6, 7 };
+byte relaypins[NUMRELAYS] = { 7, 6, 5, 4 };
 
 const unsigned long BUFFERTIMEOUT = 5000;
 const unsigned long RELAYONTIME = 2000;

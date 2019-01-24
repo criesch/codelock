@@ -38,6 +38,11 @@ Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 // output relays
 const byte NUMRELAYS = 4;
 byte relaypins[NUMRELAYS] = { 7, 6, 5, 4 };
+const byte defaultRelay = 1 << 0;
+
+// relay selection, pressing 0* before the code selects the relays defined in relaySets[0],
+// pressing 1* selects those in relaySets[1] etc.
+byte relaySets[10] = { 0x01, 0x01, 0x02, 0x04, 0x08, 0x03, 0x0b, 0x0f, 0x01, 0x01 };
 
 const unsigned long BUFFERTIMEOUT = 5000;
 const unsigned long RELAYONTIME = 2000;
@@ -50,12 +55,22 @@ String codeBuf = "";
 // keyboard timeout
 unsigned long lastkeypresstime = 0;
 
-// relays
-byte selectedRelay = 0;
-unsigned long relayActivationTime[NUMRELAYS];
+// relays selection and unlocking
+byte selectedRelay = defaultRelay;
+byte unlockedRelay = 0;
+
+// relay operation
+unsigned long relayActivationTime;
+int activeRelay = -1;
 
 // relay 1 push button
 byte pinRelay1Pb = 13;
+
+// fail counter: lock all relays for X milliseconds after Y failed attempts
+const byte LOCKOUT_THRESHOLD = 3;
+const unsigned long LOCKOUT_DURATION = 60000;
+byte lockoutCnt = 0;
+unsigned long lockoutTime = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -67,36 +82,46 @@ void setup() {
     pinMode(relaypins[i], OUTPUT);
   }
   pinMode(pinRelay1Pb, INPUT_PULLUP);
+
+  Serial.println("starting...");
 }
 
 void loop() {
-  char key = keypad.getKey();
-
+  // handle buffer timeout, if no key was pressed in the last BUFFERTIMEOUT
+  // milliseconds, clear the code buffer and select the default relay
   if ((millis() - lastkeypresstime) > BUFFERTIMEOUT) {
     if (codeBuf.length() != 0) {
-      Serial.println("timeout: clear buffer");
+      Serial.println("buffer timeout: clear buffer");
       clearbuf();
     }
-    if (selectedRelay != 0) {
-      selectedRelay = 0;
-      Serial.println("Selected relay " + String(selectedRelay));
+    if (selectedRelay != defaultRelay) {
+      selectedRelay = defaultRelay;
+      Serial.println("buffer timeout: select relays 0x" + String(selectedRelay, HEX));
     }
   }
 
-  // set back the relays after RELAYONTIME
-  for (byte i = 0; i < NUMRELAYS; i++){
-    if (millis() - relayActivationTime[i] > RELAYONTIME) {
-      digitalWrite(relaypins[i], LOW);
-    }
+  // reset the lockout counter after LOCKOUT_DURATION time
+  if (((millis() - lockoutTime) > LOCKOUT_DURATION) && (lockoutCnt > 0)) {
+    Serial.println("lockout: Reset lockout counter");
+    lockoutCnt = 0;
   }
 
-  // check the dedicated relay 1 pushbutton
-  if (digitalRead(pinRelay1Pb) == LOW) {
+  // check the dedicated second relay pushbutton. Pressing this button selects
+  // the second relay.
+  if ((lockoutCnt < LOCKOUT_THRESHOLD) && (digitalRead(pinRelay1Pb) == LOW)) {
     lastkeypresstime = millis();
-    if (selectedRelay != 1) {
-      selectedRelay = 1;
-      Serial.println("Selected relay " + String(selectedRelay));
+    if (selectedRelay != (1 << 1)) {
+      selectedRelay = (1 << 1);
+      Serial.println("pushbutton: select relay 0x" + String(selectedRelay, HEX));
     }
+  }
+
+  // handle keyboard events
+  char key;
+  if (lockoutCnt < LOCKOUT_THRESHOLD) {
+    key = keypad.getKey();
+  } else {
+    key = NO_KEY;
   }
 
   if (key != NO_KEY){
@@ -106,29 +131,56 @@ void loop() {
       case '#':
         // verify code
         if (isCodeGood()) {
-          Serial.println("Unlocking relay " + String(selectedRelay));
-          digitalWrite(relaypins[selectedRelay], HIGH);
-          relayActivationTime[selectedRelay] = millis();
+          Serial.println("unlocking relays 0x" + String(selectedRelay, HEX));
+          unlockedRelay |= selectedRelay;
+          selectedRelay = defaultRelay;
+          lockoutCnt = 0;
+        } else {
+          Serial.println("#: wrong code entered.");
+          lockoutCnt++;
+          lockoutTime = millis();
         }
         clearbuf();
         break;
       case '*':
-        // relay selection
+        // relay selection, select one of the relay sets defined in relaySets[]
         if (codeBuf.length() == 1) {
           // only if a single key is in the buffer
-          if ((codeBuf.charAt(0) >= '1') && (codeBuf.charAt(0) < '1' + NUMRELAYS)) {
-            selectedRelay = codeBuf.charAt(0) - '1';
-            Serial.println("Selected relay " + String(selectedRelay));
+          if ((codeBuf.charAt(0) >= '0') && (codeBuf.charAt(0) <= '9')) {
+            selectedRelay = relaySets[codeBuf.charAt(0) - '0'];
+            Serial.println("*: select relays 0x" + String(selectedRelay, HEX));
           }
         }
         clearbuf();
         break;
       default:
-        // add key to buffer
+        // any other key is just added to the buffer
         pushkey(key);
         break;
     }
     lastkeypresstime = millis();
+  }
+
+  // operate the relays when they are unlocked in the unlockedRelay bit field
+  if (activeRelay >= 0) {
+    // currently one relay is in on state, switch it off after RELAYONTIME
+    if (millis() - relayActivationTime > RELAYONTIME) {
+      digitalWrite(relaypins[activeRelay], LOW);
+      Serial.println("relay: switch off relay " + String(activeRelay));
+      unlockedRelay &= ~(1 << activeRelay); // clear bit
+      activeRelay = -1;
+    }
+  } else {
+    // no relay in on state, check if there is an unlocked one
+    for (byte i = 0; i < NUMRELAYS; i++) {
+      if (unlockedRelay & (1 << i)) { // test bit
+        digitalWrite(relaypins[i], HIGH);
+        Serial.println("relay: switch on relay " + String(i));
+        relayActivationTime = millis();
+        activeRelay = i;
+        break; // exit loop, we only have one relay in on state at a time
+      }
+    }
   }
 }
 
@@ -146,10 +198,8 @@ void pushkey(char c)
 bool isCodeGood()
 {
   if (codeBuf == CODE) {
-    Serial.println("unlocked");
     return true;
   } else {
-    Serial.println("wrong code");
     return false;
   }
 }

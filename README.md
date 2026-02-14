@@ -16,6 +16,10 @@ Digikey part numbers are
 | 1   | Seed Technology Relay Shield | 1597-1146-ND        |
 | 1   | SparkFun 14662 Keypad        | 1568-14662-ND       |
 
+I have 3D printed a housing for the SparkFun keyboard, see the STL files in the housing
+subdirectory. The housing is for the keyboard only. I mount the Arduino and the relay
+shield in a box inside the building to prevent someone from bridging the relay contacts.
+
 ## Wiring
 
 The keypad is wired to the Arduino as follows:
@@ -46,7 +50,7 @@ The code is hardcoded in the variable CODE.
 
 code lock
 
-Copyright (c) 2019-2025 Christian Riesch, christian@riesch.at
+Copyright (c) 2019-2026 Christian Riesch, christian@riesch.at
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above
